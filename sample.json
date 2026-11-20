@@ -1,0 +1,36 @@
+{
+  "trial": "CW-day-01",
+  "left": {
+    "station": "A",
+    "revision": 1,
+    "source": "日班甲台架停激测次 A-003，内部测点 A-9",
+    "initial_state": ["1"],
+    "model": {
+      "ports": ["drive", "return", "meter"],
+      "transition": [["2"]],
+      "input_vector": ["0"],
+      "return_vector": ["1"],
+      "return_feedthrough": "0",
+      "observation_vector": ["1"],
+      "observation_feedthrough": "-4"
+    }
+  },
+  "right": {
+    "station": "B",
+    "revision": 1,
+    "source": "日班乙台架直通核对测次 B-005，内部测点 B-4",
+    "initial_state": [],
+    "model": {
+      "ports": ["feed", "echo", "meter"],
+      "transition": [],
+      "input_vector": [],
+      "return_vector": [],
+      "return_feedthrough": "1",
+      "observation_vector": [],
+      "observation_feedthrough": "1"
+    }
+  },
+  "connected": ["1", "1"],
+  "disconnected": ["1", "0"],
+  "preview_ticks": 4
+}

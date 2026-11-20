@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "trial": "CW-phase-01",
+      "left": {
+        "station": "A", "revision": 1, "initial_state": [1], "source": "甲站停激原测 A-021",
+        "model": {
+          "ports": ["drive", "return", "meter"], "phase": 0,
+          "stages": [
+            {"transition": [[1]], "input_vector": [0], "return_vector": [1], "return_feedthrough": 0, "observation_vector": [0], "observation_feedthrough": 0},
+            {"transition": [[1]], "input_vector": [0], "return_vector": [0], "return_feedthrough": 0, "observation_vector": [0], "observation_feedthrough": 0}
+          ]
+        }
+      },
+      "right": {
+        "station": "B", "revision": 1, "initial_state": [], "source": "乙站停激原测 B-011",
+        "model": {
+          "ports": ["feed", "echo", "meter"], "phase": 0,
+          "stages": [
+            {"transition": [], "input_vector": [], "return_vector": [], "return_feedthrough": 0, "observation_vector": [], "observation_feedthrough": 0},
+            {"transition": [], "input_vector": [], "return_vector": [], "return_feedthrough": 0, "observation_vector": [], "observation_feedthrough": 1}
+          ]
+        }
+      },
+      "right_correction": {"revision": 2, "phase": 1, "source": "乙站复核更正 B-012"},
+      "gains": [1, 0], "observation": ["B", "observation", "meter"],
+      "checks": [
+        {"right_revision": 1, "values": ["0", "1", "0", "1", "0", "1", "0", "1"], "verdict": "no_decay"},
+        {"right_revision": 2, "values": ["0", "0", "0", "0", "0", "0", "0", "0"], "verdict": "decay"}
+      ]
+    },
+    {
+      "trial": "CW-phase-02",
+      "left": {
+        "station": "A", "revision": 1, "initial_state": [1], "source": "甲站停激原测 A-022",
+        "model": {
+          "ports": ["drive", "return", "meter"], "phase": 0,
+          "stages": [
+            {"transition": [[1]], "input_vector": [0], "return_vector": [0], "return_feedthrough": 0, "observation_vector": [0], "observation_feedthrough": 0},
+            {"transition": [[1]], "input_vector": [0], "return_vector": [1], "return_feedthrough": 0, "observation_vector": [0], "observation_feedthrough": 0}
+          ]
+        }
+      },
+      "right": {
+        "station": "B", "revision": 1, "initial_state": [], "source": "乙站停激原测 B-021",
+        "model": {
+          "ports": ["feed", "echo", "meter"], "phase": 0,
+          "stages": [
+            {"transition": [], "input_vector": [], "return_vector": [], "return_feedthrough": 0, "observation_vector": [], "observation_feedthrough": 1},
+            {"transition": [], "input_vector": [], "return_vector": [], "return_feedthrough": 0, "observation_vector": [], "observation_feedthrough": 0},
+            {"transition": [], "input_vector": [], "return_vector": [], "return_feedthrough": 0, "observation_vector": [], "observation_feedthrough": 0}
+          ]
+        }
+      },
+      "gains": [1, 0], "observation": ["B", "observation", "meter"],
+      "checks": [
+        {"right_revision": 1, "values": ["0", "0", "0", "0", "0", "0", "1", "0", "0", "0", "0", "0", "1"], "verdict": "no_decay"}
+      ]
+    }
+  ]
+}
