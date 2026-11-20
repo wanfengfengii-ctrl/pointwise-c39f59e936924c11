@@ -3,7 +3,14 @@ import sqlite3
 from dataclasses import dataclass
 
 from trial.cutoff import CutoffState, validate_cutoff
-from trial.model import StationModel, dynamics_payload, validate_model, validate_name
+from trial.model import (
+    PeriodicModel,
+    StationModel,
+    dynamics_payload,
+    stages_payload,
+    validate_name,
+    validate_station_or_periodic,
+)
 from trial.rationals import format_rational
 
 
@@ -12,7 +19,7 @@ class TrialRevision:
     trial: str
     station: str
     revision: int
-    model: StationModel
+    model: StationModel | PeriodicModel
     cutoff: CutoffState
 
 
@@ -44,9 +51,16 @@ class RevisionStore:
 
     def add(self, entry: TrialRevision) -> TrialRevision:
         key = revision_key(entry.trial, entry.station, entry.revision)
-        model = validate_model(entry.model)
+        model = validate_station_or_periodic(entry.model)
         cutoff = validate_cutoff(model, entry.cutoff.initial_state, entry.cutoff.source)
-        model_json = json.dumps({'ports': model.ports, **dynamics_payload(model.dynamics)})
+        if isinstance(model, PeriodicModel):
+            model_json = json.dumps({
+                'ports': model.ports,
+                'stages': stages_payload(model.stages),
+                'phase': model.phase,
+            })
+        else:
+            model_json = json.dumps({'ports': model.ports, **dynamics_payload(model.dynamics)})
         state_json = json.dumps([format_rational(value) for value in cutoff.initial_state])
         with self._connection:
             result = self._connection.execute('''
@@ -67,6 +81,6 @@ class RevisionStore:
         if row is None:
             return None
         model_text, state_text, source = row
-        model = validate_model(json.loads(model_text))
+        model = validate_station_or_periodic(json.loads(model_text))
         cutoff = validate_cutoff(model, json.loads(state_text), source)
         return TrialRevision(*key, model, cutoff)

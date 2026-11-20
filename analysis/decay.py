@@ -60,8 +60,66 @@ def observed_recurrence(loop: ClosedLoop, observation: ObservationRef) -> Polyno
     return tuple(reversed(normalized + (Fraction(0),) * (order + 1 - len(normalized))))
 
 
+def _observed_sequence(loop: ClosedLoop, observation: ObservationRef, count: int) -> list[Fraction]:
+    state = initial_loop_state(loop)
+    values: list[Fraction] = []
+    for _ in range(count):
+        state, outputs = step_closed_loop(loop, state)
+        values.append(select_observation(observation, outputs))
+    return values
+
+
+def _berlekamp_massey(sequence: list[Fraction]) -> Polynomial:
+    """Return the monic characteristic polynomial of the minimal linear recurrence."""
+    connection = [Fraction(1)]
+    previous = [Fraction(1)]
+    order = 0
+    shift = 1
+    scale = Fraction(1)
+    for index, value in enumerate(sequence):
+        discrepancy = value
+        for offset in range(1, order + 1):
+            discrepancy += connection[offset] * sequence[index - offset]
+        if discrepancy == 0:
+            shift += 1
+            continue
+        coefficient = discrepancy / scale
+        updated = list(connection)
+        if len(updated) < len(previous) + shift:
+            updated += [Fraction(0)] * (len(previous) + shift - len(updated))
+        for offset, base in enumerate(previous):
+            updated[offset + shift] -= coefficient * base
+        if 2 * order <= index:
+            order = index + 1 - order
+            previous = list(connection)
+            scale = discrepancy
+            shift = 1
+        else:
+            shift += 1
+        connection = updated
+    connection = connection[:order + 1]
+    while len(connection) < order + 1:
+        connection.append(Fraction(0))
+    return tuple(reversed(connection))
+
+
+def _periodic_recurrence(loop: ClosedLoop, observation: ObservationRef) -> Polynomial:
+    # Each residue class of the period obeys a fixed monodromy of the loop's
+    # coordinate dimension, so the assembled minimal recurrence has order at
+    # most ``period * dimension``. Sample well past twice that bound.
+    dimension = len(initial_loop_state(loop).coordinates())
+    count = 4 * dimension * loop.period + 2
+    return _berlekamp_massey(_observed_sequence(loop, observation, count))
+
+
+def _annihilator(loop: ClosedLoop, observation: ObservationRef) -> Polynomial:
+    if loop.period == 1:
+        return observed_recurrence(loop, observation)
+    return _periodic_recurrence(loop, observation)
+
+
 def decide_decay(loop: ClosedLoop, observation: ObservationRef) -> DecayVerdict:
-    recurrence = observed_recurrence(loop, observation)
+    recurrence = _annihilator(loop, observation)
     if roots_strictly_inside_unit_disk(recurrence):
         return DecayVerdict.DECAY
     return DecayVerdict.NO_DECAY

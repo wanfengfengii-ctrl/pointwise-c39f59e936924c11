@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from station.response import StationResponse
+from station.response import PeriodicResponse, StationResponse
 from trial.model import parse_vector, validate_dynamics, validate_name
 from trial.revisions import revision_key
 
@@ -57,9 +57,19 @@ def validate_envelope(evidence: StationEvidence) -> StationEvidence:
     ports = validate_port_group(evidence.ports)
     if evidence.ports != ports or ports[0].station != evidence.station:
         raise ValueError('evidence ports do not match the source station')
-    if not isinstance(evidence.response, StationResponse):
+    if not isinstance(evidence.response, (StationResponse, PeriodicResponse)):
         raise ValueError('expected a public station response')
     response = evidence.response
+    if isinstance(response, PeriodicResponse):
+        stages = tuple(validate_dynamics(stage) for stage in response.stages)
+        if not stages or any(stage.dimension != stages[0].dimension for stage in stages):
+            raise ValueError('every stage must use the same state coordinates')
+        initial = parse_vector(response.initial_state, stages[0].dimension, 'response initial state')
+        if type(response.phase) is not int or not 0 <= response.phase < len(stages):
+            raise ValueError('phase must be a non-boolean stage index within range')
+        if response != PeriodicResponse(stages, initial, response.phase):
+            raise ValueError('station response must be in normalized coordinates')
+        return evidence
     dynamics = validate_dynamics(response.dynamics)
     initial = parse_vector(response.initial_state, dynamics.dimension, 'response initial state')
     if response != StationResponse(dynamics, initial):

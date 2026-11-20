@@ -3,25 +3,54 @@ import json
 from dataclasses import asdict
 
 from station.envelope import PortGroup, PublicPort, StationEvidence, validate_envelope
-from station.response import StationResponse
-from trial.model import dynamics_payload, parse_vector, validate_dynamics
+from station.response import PeriodicResponse, StationResponse
+from trial.model import (
+    dynamics_payload,
+    parse_vector,
+    stages_payload,
+    validate_dynamics,
+)
 from trial.rationals import format_rational
 
-_VERSION = 1
 _ENVELOPE_FIELDS = {'version', 'evidence_id', 'trial', 'station', 'revision', 'ports', 'response'}
+_V1_RESPONSE_FIELDS = {'dynamics', 'initial_state'}
+_V2_RESPONSE_FIELDS = {'initial_state', 'stages', 'phase'}
 
 
 def _canonical_json(value: dict) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(',', ':'))
 
 
-def _body(trial: str, station: str, revision: int, ports: PortGroup, response: StationResponse) -> dict:
-    return {
-        'version': _VERSION,
+def evidence_version(response: StationResponse | PeriodicResponse) -> int:
+    return 2 if isinstance(response, PeriodicResponse) else 1
+
+
+def _body(
+    trial: str,
+    station: str,
+    revision: int,
+    ports: PortGroup,
+    response: StationResponse | PeriodicResponse,
+) -> dict:
+    common = {
         'trial': trial,
         'station': station,
         'revision': revision,
         'ports': [asdict(port) for port in ports],
+    }
+    if isinstance(response, PeriodicResponse):
+        return {
+            'version': 2,
+            **common,
+            'response': {
+                'initial_state': [format_rational(value) for value in response.initial_state],
+                'stages': stages_payload(response.stages),
+                'phase': response.phase,
+            },
+        }
+    return {
+        'version': 1,
+        **common,
         'response': {
             'dynamics': dynamics_payload(response.dynamics),
             'initial_state': [format_rational(value) for value in response.initial_state],
@@ -34,7 +63,11 @@ def _fixed_id(body: dict) -> str:
 
 
 def seal_evidence(
-    trial: str, station: str, revision: int, ports: PortGroup, response: StationResponse
+    trial: str,
+    station: str,
+    revision: int,
+    ports: PortGroup,
+    response: StationResponse | PeriodicResponse,
 ) -> StationEvidence:
     body = _body(trial, station, revision, ports, response)
     evidence = StationEvidence(_fixed_id(body), trial, station, revision, ports, response)
@@ -62,6 +95,42 @@ def _unique_json_object(items: list[tuple[str, object]]) -> dict:
     return result
 
 
+def _decode_ports(raw_ports: object) -> tuple[PublicPort, ...]:
+    if not isinstance(raw_ports, list) or len(raw_ports) != 3:
+        raise ValueError('invalid station evidence port list')
+    ports = []
+    for raw_port in raw_ports:
+        if not isinstance(raw_port, dict) or raw_port.keys() != {'station', 'purpose', 'name'}:
+            raise ValueError('invalid public port fields')
+        ports.append(PublicPort(**raw_port))
+    return tuple(ports)
+
+
+def _decode_v1_response(raw_response: object) -> StationResponse:
+    if not isinstance(raw_response, dict) or raw_response.keys() != _V1_RESPONSE_FIELDS:
+        raise ValueError('invalid station response fields')
+    dynamics = validate_dynamics(raw_response['dynamics'])
+    initial = parse_vector(raw_response['initial_state'], dynamics.dimension, 'response initial state')
+    return StationResponse(dynamics, initial)
+
+
+def _decode_v2_response(raw_response: object) -> PeriodicResponse:
+    if not isinstance(raw_response, dict) or raw_response.keys() != _V2_RESPONSE_FIELDS:
+        raise ValueError('invalid periodic station response fields')
+    raw_stages = raw_response['stages']
+    if not isinstance(raw_stages, list) or not 1 <= len(raw_stages) <= 3:
+        raise ValueError('periodic response requires one to three stages')
+    stages = tuple(validate_dynamics(stage) for stage in raw_stages)
+    dimension = stages[0].dimension
+    if any(stage.dimension != dimension for stage in stages):
+        raise ValueError('every stage must use the same state coordinates')
+    initial = parse_vector(raw_response['initial_state'], dimension, 'response initial state')
+    phase = raw_response['phase']
+    if type(phase) is not int or not 0 <= phase < len(stages):
+        raise ValueError('phase must be a non-boolean stage index within range')
+    return PeriodicResponse(stages, initial, phase)
+
+
 def decode_evidence(text: str) -> StationEvidence:
     if not isinstance(text, str):
         raise ValueError('station evidence must be JSON text')
@@ -71,24 +140,18 @@ def decode_evidence(text: str) -> StationEvidence:
         raise ValueError('malformed station evidence JSON') from exc
     if not isinstance(document, dict) or document.keys() != _ENVELOPE_FIELDS:
         raise ValueError('invalid station evidence fields')
-    if type(document['version']) is not int or document['version'] != _VERSION:
+    version = document['version']
+    if type(version) is not int or version not in (1, 2):
         raise ValueError('unsupported station evidence version')
-    raw_ports = document['ports']
-    if not isinstance(raw_ports, list) or len(raw_ports) != 3:
-        raise ValueError('invalid station evidence port list')
-    ports = []
-    for raw_port in raw_ports:
-        if not isinstance(raw_port, dict) or raw_port.keys() != {'station', 'purpose', 'name'}:
-            raise ValueError('invalid public port fields')
-        ports.append(PublicPort(**raw_port))
+    ports = _decode_ports(document['ports'])
     raw_response = document['response']
-    if not isinstance(raw_response, dict) or raw_response.keys() != {'dynamics', 'initial_state'}:
-        raise ValueError('invalid station response fields')
-    dynamics = validate_dynamics(raw_response['dynamics'])
-    initial = parse_vector(raw_response['initial_state'], dynamics.dimension, 'response initial state')
+    expected_fields = _V2_RESPONSE_FIELDS if version == 2 else _V1_RESPONSE_FIELDS
+    if not isinstance(raw_response, dict) or raw_response.keys() != expected_fields:
+        raise ValueError('station response fields do not match the declared version')
+    response = _decode_v2_response(raw_response) if version == 2 else _decode_v1_response(raw_response)
     evidence = StationEvidence(
         document['evidence_id'], document['trial'], document['station'], document['revision'],
-        tuple(ports), StationResponse(dynamics, initial),
+        ports, response,
     )
     _checked_body(evidence)
     return evidence

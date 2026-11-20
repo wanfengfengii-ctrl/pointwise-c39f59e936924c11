@@ -32,6 +32,21 @@ class StationModel:
     ports: tuple[str, str, str]
     dynamics: Dynamics
 
+    @property
+    def dimension(self) -> int:
+        return self.dynamics.dimension
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodicModel:
+    ports: tuple[str, str, str]
+    stages: tuple[Dynamics, ...]
+    phase: int
+
+    @property
+    def dimension(self) -> int:
+        return self.stages[0].dimension
+
 
 def validate_name(value: object, label: str) -> str:
     if not isinstance(value, str) or not value or value != value.strip() or not value.isprintable():
@@ -83,6 +98,39 @@ def validate_model(value: object) -> StationModel:
     return StationModel(ports, validate_dynamics(dynamics))
 
 
+MAX_STAGES = 3
+_PERIODIC_FIELDS = {'ports', 'stages', 'phase'}
+
+
+def validate_periodic_model(value: object) -> PeriodicModel:
+    if isinstance(value, PeriodicModel):
+        names, stages, phase = value.ports, value.stages, value.phase
+    elif isinstance(value, Mapping) and value.keys() == _PERIODIC_FIELDS:
+        names, stages, phase = value['ports'], value['stages'], value['phase']
+    else:
+        raise ValueError('periodic model must specify ports, stages and phase')
+    if not isinstance(names, (list, tuple)) or len(names) != 3:
+        raise ValueError('model must specify input, return and observation port names')
+    ports = tuple(validate_name(name, 'port name') for name in names)
+    if not isinstance(stages, (list, tuple)) or not 1 <= len(stages) <= MAX_STAGES:
+        raise ValueError('stages must contain one to three ordered stages')
+    parsed_stages = tuple(validate_dynamics(stage) for stage in stages)
+    dimension = parsed_stages[0].dimension
+    if any(stage.dimension != dimension for stage in parsed_stages):
+        raise ValueError('every stage must use the same state coordinates')
+    if type(phase) is not int or not 0 <= phase < len(parsed_stages):
+        raise ValueError('phase must be a non-boolean stage index within range')
+    return PeriodicModel(ports, parsed_stages, phase)
+
+
+def validate_station_or_periodic(value: object) -> StationModel | PeriodicModel:
+    if isinstance(value, PeriodicModel):
+        return validate_periodic_model(value)
+    if isinstance(value, Mapping) and value.keys() == _PERIODIC_FIELDS:
+        return validate_periodic_model(value)
+    return validate_model(value)
+
+
 def dynamics_payload(dynamics: Dynamics) -> dict:
     def coefficients(row: Vector) -> list[str]:
         return [format_rational(value) for value in row]
@@ -95,3 +143,7 @@ def dynamics_payload(dynamics: Dynamics) -> dict:
         'observation_vector': coefficients(dynamics.observation_vector),
         'observation_feedthrough': format_rational(dynamics.observation_feedthrough),
     }
+
+
+def stages_payload(stages: tuple[Dynamics, ...]) -> list[dict]:
+    return [dynamics_payload(stage) for stage in stages]

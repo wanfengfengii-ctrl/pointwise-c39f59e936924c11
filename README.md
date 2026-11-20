@@ -13,10 +13,10 @@ python3 -B demo.py
 
 | 入口 | 输入及结果 |
 | --- | --- |
-| `trial.registry.register(store, trial, station, revision, model, initial_state, source)` | 按试验、站和正整数修订号追加登记，返回 `TrialRevision`。`source` 为留站原测出处。 |
-| `station.freeze.freeze_station(revisions, evidence_store, trial, station, revision)` | 精确取得指定修订，返回带固定号的 `StationEvidence`。`station.issue.export_station(evidence_store, evidence_id)` 按号返回 V1 JSON 文本。 |
+| `trial.registry.register(store, trial, station, revision, model, initial_state, source)` | 按试验、站和正整数修订号追加登记，返回 `TrialRevision`。`source` 为留站原测出处。模型可以是 V1 系数字典，也可以是带 `ports`、`stages`、`phase` 的周期字典（见 [PERIODIC.md](PERIODIC.md)）。 |
+| `station.freeze.freeze_station(revisions, evidence_store, trial, station, revision)` | 精确取得指定修订，返回带固定号的 `StationEvidence`。`station.issue.export_station(evidence_store, evidence_id)` 按号返回 JSON 文本，V1 或 V2 视冻结修订而定。 |
 | `wiring.freeze.freeze_wiring(registry, left_ports, right_ports, left_to_right, right_to_left)` | 返回固定 `WiringRevision`。先用 `registry.register_ports(evidence.ports)` 登记两站完整口组。`registry.get_fixed(wiring_id)` 领取冻结接线。两个增益参数均必填。 |
-| `analysis.replay.preview(first, second, wiring, observation, ticks)` | 接收站件对象或 V1 JSON 文本、固定接线对象、`PublicPort` 和非负整数拍数，返回有序 `ReplaySample` 元组。零拍数仍核验父件与观测口。 |
+| `analysis.replay.preview(first, second, wiring, observation, ticks)` | 接收站件对象或 JSON 文本（V1/V2）、固定接线对象、`PublicPort` 和非负整数拍数，返回有序 `ReplaySample` 元组。零拍数仍核验父件与观测口。 |
 | `report.issue.issue_report(archive, first, second, wiring, observation)` | 返回 `(ReportRecord, IssueReceipt)`。沿接线方向配对站件，调用者可以交换两个站件参数的顺序。 |
 | `report.readback.read_report(archive, report_id)` | 按正整数报告号返回归档时的 `(ReportRecord, IssueReceipt)`。查无该号时返回 `None`。 |
 
@@ -29,6 +29,8 @@ python3 -B demo.py
 设本站第 t 拍状态为 x，已有入量为 u。该拍读取两个公开输出 `C*x + D*u`，并按 `A*x + B*u` 推进本站状态。两站本拍回线出量分别乘其方向的冻结增益，作为对站下一拍的入量。输入及输出使用归一化读数，增益为无量纲倍率，每拍为一个离散采样间隔。零拍使用登记的实际状态且两个入量均为零。无状态直通使用空矩阵与空向量。短窗按同一拍序给出精确 `Fraction` 值。离线裁决使用指定口实际序列的有效递推，严格按开单位圆内的根判断趋零。零序列和有限尾段报 `decay`，持续常量、持续振荡及增长报 `no_decay`。
 
 V1 JSON 以 `version`、`evidence_id`、`trial`、`station`、`revision`、`ports`、`response` 作为外层字段。`response` 中的状态坐标按位置编号，有理数按规范分式文本输出。原测出处只在本地修订记录中保存。站件号由其固定内容确定，接线号由两端完整口组和两向增益、延迟确定。重复冻结相同内容得到同号，修订身份或配置变化产生不同固定号。
+
+周期修订生成 V2 站件，外层字段与 V1 相同而 `version` 为整数 `2`，`response` 改由 `initial_state`、`stages`、`phase` 组成。各拍阶段下标按 `(phase + t) % len(stages)` 轮转，状态和在途回线跨阶段及周期边界连续承接。双件须同版、同试验、异站且与固定接线两端相符；混版、错配、坏件报 `ValueError`。详见 [PERIODIC.md](PERIODIC.md)。
 
 形状、数值、重复修订和身份错配用 `ValueError` 拒绝。指定试验修订、已登记口组或导出站件查无记录时用 `KeyError` 拒绝。合法请求产生的报告与成功回执在同一 SQLite 事务提交。数据库写入或提交异常传播给调用者，本次报告和回执一并回滚。领取通过报告号联读归档正文和该号的原成功回执。
 

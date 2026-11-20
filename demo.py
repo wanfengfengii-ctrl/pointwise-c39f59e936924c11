@@ -127,6 +127,80 @@ def main():
                 ['station/freeze.py', 'report/issue.py', 'report/archive.py', 'report/readback.py'],
                 '零初态在断线下始终为零。旧号的正文与回执须与首次签发时保存的值一致。',
             )
+        _periodic_demo(temp, periodic_cases())
+
+
+def periodic_cases():
+    path = Path(__file__).with_name('periodic-sample.json')
+    return json.loads(path.read_text(encoding='utf-8'))['cases']
+
+
+def _public_observation(left, right, triple):
+    station, purpose, name = triple
+    target = left if left.station == station else right
+    return next(port for port in target.ports if port.purpose == purpose and port.name == name)
+
+
+def _periodic_demo(temp, cases):
+    case = next(item for item in cases if item['trial'] == 'CW-phase-01')
+    source_path = Path(temp) / 'periodic-station.sqlite'
+    archive_path = Path(temp) / 'periodic-center.sqlite'
+    correction = case['right_correction']
+    corrected_entry = {
+        **case['right'], 'revision': correction['revision'], 'source': correction['source'],
+        'model': {**case['right']['model'], 'phase': correction['phase']},
+    }
+    with closing(sqlite3.connect(archive_path)) as center:
+        registry = WiringRegistry(center)
+        archive = ReportArchive(center)
+        registry.initialize()
+        archive.initialize()
+        with closing(sqlite3.connect(source_path)) as source:
+            left, exported_left = _freeze(source, case['trial'], case['left'])
+            right, exported_right = _freeze(source, case['trial'], case['right'])
+            corrected, exported_corrected = _freeze(source, case['trial'], corrected_entry)
+            registry.register_ports(left.ports)
+            registry.register_ports(right.ports)
+            wiring = freeze_wiring(registry, left.ports, right.ports, *case['gains'])
+            observation = _public_observation(left, right, case['observation'])
+        original_check, corrected_check = case['checks']
+        issued = issue_report(archive, exported_left, exported_right, wiring, observation)
+        _scenario(
+            'v8.periodic-phase',
+            {'trial': case['trial'], 'right_revision': 1, 'gains': case['gains'],
+             'ticks': len(original_check['values'])},
+            original_check['values'], [str(reading.value) for reading in preview(
+                exported_left, exported_right, wiring, observation, len(original_check['values']))],
+            original_check['verdict'], issued[0].verdict.value,
+            ['trial/model.py', 'station/codec.py', 'analysis/closed_loop.py', 'analysis/decay.py'],
+            '乙站原相位在奇数拍读到单位读数，前八拍为 0、1 交替，故仍须复测。',
+        )
+        corrected_issued = issue_report(archive, exported_left, exported_corrected, wiring, observation)
+        _scenario(
+            'v9.periodic-correction',
+            {'right_revision': correction['revision'], 'phase': correction['phase'],
+             'ticks': len(corrected_check['values'])},
+            corrected_check['values'], [str(reading.value) for reading in preview(
+                exported_left, exported_corrected, wiring, observation, len(corrected_check['values']))],
+            corrected_check['verdict'], corrected_issued[0].verdict.value,
+            ['trial/registry.py', 'station/freeze.py', 'station/codec.py', 'analysis/decay.py'],
+            '更正只改乙站起始相位，零拍入线为空，读数转为恒零。',
+        )
+    with closing(sqlite3.connect(archive_path)) as reopened:
+        archive = ReportArchive(reopened)
+        archive.initialize()
+        old_read = read_report(archive, issued[0].report_id)
+        new_read = read_report(archive, corrected_issued[0].report_id)
+        _scenario(
+            'v10.periodic-reopen',
+            {'old_report': issued[0].report_id, 'new_report': corrected_issued[0].report_id},
+            [original_check['verdict'], corrected_check['verdict'], _handoff_value(issued)],
+            [old_read[0].verdict.value, new_read[0].verdict.value, _handoff_value(old_read)],
+            [original_check['verdict'], corrected_check['verdict'], _handoff_value(issued)],
+            [old_read[0].verdict.value, new_read[0].verdict.value, _handoff_value(old_read)],
+            ['report/archive.py', 'report/readback.py'],
+            '站库关闭后仅凭两件在中心签发；重开中心库按号领取原裁决和回执。',
+        )
 
 
 if __name__ == '__main__':
